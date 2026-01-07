@@ -1,0 +1,125 @@
+// components/Auth.tsx
+import React, { useState, useEffect } from "react";
+import { Button, TextInput, View, Alert, StyleSheet } from "react-native";
+import * as Linking from "expo-linking";
+import { useNavigation } from "@react-navigation/native";
+import { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { supabase } from "../utils/supabase";
+import { RootStackParamList } from "../navigation/types";
+
+type AuthScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, "Auth">;
+
+export default function Auth() {
+  const [email, setEmail] = useState("");
+  const navigation = useNavigation<AuthScreenNavigationProp>();
+
+  /**
+   * Handles completing the magic link login
+   */
+  const createSessionFromUrl = async (url: string) => {
+    try {
+      const { data, error } = await supabase.auth.exchangeCodeForSession(url);
+      if (error) throw error;
+
+      console.log("Logged in session:", data.session);
+      Alert.alert("Success", "You are now logged in!");
+
+      // Navigate to Home
+      navigation.reset({
+        index: 0,
+        routes: [{ name: "Home" }],
+      });
+    } catch (err) {
+      console.error("Failed to create session from URL:", err);
+      Alert.alert("Error", "Failed to log in. Please try again.");
+    }
+  };
+
+  /**
+   * Sets up deep link handling (both cold start and in-app)
+   */
+  useEffect(() => {
+    // Handle app opened while already running
+    const handleUrl = async (event: { url: string }) => {
+      console.log("Incoming deep link:", event.url);
+      await createSessionFromUrl(event.url);
+    };
+
+    const subscription = Linking.addEventListener("url", handleUrl);
+
+    // Handle cold start deep link
+    Linking.getInitialURL().then((url) => {
+      if (url) {
+        console.log("App opened from deep link:", url);
+        createSessionFromUrl(url);
+      }
+    });
+
+    return () => subscription.remove();
+  }, []);
+
+  /**
+   * Sends a magic link email
+   */
+  const sendMagicLink = async () => {
+    if (!email) {
+      Alert.alert("Error", "Please enter your email first");
+      return;
+    }
+
+    try {
+      const redirectTo = Linking.createURL("/", { scheme: "shiftcal" });
+
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: {
+          emailRedirectTo: redirectTo,
+        },
+      });
+
+      if (error) throw error;
+
+      Alert.alert("Magic Link Sent", "Check your email to complete login.");
+    } catch (err: any) {
+      console.error("Error sending magic link:", err);
+      let message = "Failed to send magic link. Try again later.";
+
+      if (err?.message?.includes("Database error")) {
+        message = "There was an issue creating your account. Try a different email.";
+      } else if (err?.message?.includes("For security purposes")) {
+        message = "Please wait a minute before requesting another magic link.";
+      }
+
+      Alert.alert("Error", message);
+    }
+  };
+
+  return (
+    <View style={styles.container}>
+      <TextInput
+        placeholder="Enter your email"
+        value={email}
+        onChangeText={setEmail}
+        keyboardType="email-address"
+        autoCapitalize="none"
+        style={styles.input}
+      />
+      <Button onPress={sendMagicLink} title="Send Magic Link" />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    width: "100%",
+    padding: 20,
+    justifyContent: "center",
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: "#ccc",
+    padding: 10,
+    marginBottom: 20,
+    borderRadius: 5,
+  },
+});

@@ -1,0 +1,147 @@
+// screens/Month.tsx
+import React, { useEffect, useState } from "react";
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator } from "react-native";
+import { supabase } from "../utils/supabase";
+import { Shift } from "../types"; // define your Shift interface in types.ts
+import { Calendar, CalendarProps, DateData } from "react-native-calendars";
+import { format, startOfMonth, endOfMonth } from "date-fns";
+import { toZonedTime } from "date-fns-tz";
+
+export default function Month() {
+  const [shifts, setShifts] = useState<Shift[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [markedDates, setMarkedDates] = useState<{ [key: string]: any }>({});
+
+  const TIMEZONE = "Australia/Melbourne";
+
+  useEffect(() => {
+    fetchShifts();
+  }, []);
+
+  const fetchShifts = async () => {
+    setLoading(true);
+    try {
+      const { data: userData } = await supabase.auth.getUser();
+      const user = userData.user;
+      if (!user) throw new Error("Not logged in");
+
+      const monthStart = startOfMonth(new Date());
+      const monthEnd = endOfMonth(new Date());
+
+      const { data, error } = await supabase
+        .from<"shifts", Shift>("shifts")
+        .select("*")
+        .gte("start_time", monthStart.toISOString())
+        .lte("start_time", monthEnd.toISOString())
+        .order("start_time");
+
+      if (error) throw error;
+      if (!data) data = [];
+
+      // Convert UTC timestamptz to Melbourne time
+      const localShifts = data.map((shift) => ({
+        ...shift,
+        start_time_local: toZonedTime(new Date(shift.start_time), TIMEZONE),
+        end_time_local: toZonedTime(new Date(shift.end_time), TIMEZONE),
+      }));
+
+      setShifts(localShifts);
+
+      // Build marked dates for the calendar
+      const marks: { [key: string]: any } = {};
+      localShifts.forEach((shift) => {
+        const dateStr = format(shift.start_time_local, "yyyy-MM-dd");
+        if (!marks[dateStr]) marks[dateStr] = { marked: true, dots: [{ color: "#1E90FF" }] };
+      });
+
+      setMarkedDates(marks);
+    } catch (err: any) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const renderShiftsForDay = (date: DateData) => {
+    const shiftsForDay = shifts.filter(
+      (s) => format(s.start_time_local, "yyyy-MM-dd") === date.dateString
+    );
+
+    if (!shiftsForDay.length) return null;
+
+    return shiftsForDay.map((shift) => (
+      <View key={shift.id} style={styles.shiftItem}>
+        <Text style={styles.shiftTime}>
+          {format(shift.start_time_local, "HH:mm")} - {format(shift.end_time_local, "HH:mm")}
+        </Text>
+        <Text style={styles.shiftTitle}>{shift.title || "Shift"}</Text>
+        <Text style={styles.shiftLocation}>{shift.location}</Text>
+      </View>
+    ));
+  };
+
+  return (
+    <ScrollView contentContainerStyle={styles.container}>
+      <Text style={styles.title}>My Shifts This Month</Text>
+      {loading ? (
+        <ActivityIndicator size="large" />
+      ) : (
+        <Calendar
+          markingType={"multi-dot"}
+          markedDates={markedDates}
+          onDayPress={renderShiftsForDay as unknown as CalendarProps["onDayPress"]}
+        />
+      )}
+
+      {/* Optional: Render all shifts below the calendar */}
+      <View style={styles.shiftList}>
+        {shifts.map((shift) => (
+          <View key={shift.id} style={styles.shiftItem}>
+            <Text style={styles.shiftDate}>
+              {format(shift.start_time_local, "dd/MM/yyyy")}
+            </Text>
+            <Text style={styles.shiftTime}>
+              {format(shift.start_time_local, "HH:mm")} - {format(shift.end_time_local, "HH:mm")}
+            </Text>
+            <Text style={styles.shiftTitle}>{shift.title || "Shift"}</Text>
+            <Text style={styles.shiftLocation}>{shift.location}</Text>
+          </View>
+        ))}
+      </View>
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flexGrow: 1,
+    padding: 20,
+  },
+  title: {
+    fontSize: 22,
+    fontWeight: "bold",
+    marginBottom: 12,
+  },
+  shiftList: {
+    marginTop: 20,
+  },
+  shiftItem: {
+    padding: 12,
+    borderWidth: 1,
+    borderColor: "#ccc",
+    borderRadius: 6,
+    marginBottom: 12,
+  },
+  shiftDate: {
+    fontWeight: "bold",
+  },
+  shiftTime: {
+    color: "#1E90FF",
+  },
+  shiftTitle: {
+    fontWeight: "500",
+  },
+  shiftLocation: {
+    color: "#666",
+  },
+});

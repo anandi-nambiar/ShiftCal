@@ -1,0 +1,35 @@
+# Node modules are installed automatically on the build server
+node_modules/
+
+# Expo cache
+.expo/
+.expo-shared/
+
+# Local build artifacts
+android/
+ios/
+build/
+dist/
+web-build/
+
+# Logs
+*.log
+
+# Local IDE files
+.vscode/
+.idea/
+.DS_Store
+
+# Large media not needed for build
+assets/**/*.mp4
+assets/**/*.mov
+assets/**/*.zip
+assets/**/*.tar.gz
+
+# Test coverage / temporary files
+coverage/
+*.tmp
+*.bak
+
+# Ignore tarballs
+*.tgz

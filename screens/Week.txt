@@ -1,0 +1,112 @@
+// screens/Week.tsx
+import React, { useEffect, useState } from "react";
+import { View, Text, StyleSheet, ScrollView } from "react-native";
+import { supabase } from "../utils/supabase";
+import { toZonedTime, format } from "date-fns-tz";
+import { startOfWeek, endOfWeek, differenceInMinutes, addDays } from "date-fns";
+
+interface Shift {
+  id: string;
+  start_time: string;
+  end_time: string;
+  title: string | null;
+  location: string | null;
+}
+
+export default function Week() {
+  const [shifts, setShifts] = useState<Shift[]>([]);
+  const [totalMinutes, setTotalMinutes] = useState(0);
+
+  useEffect(() => {
+    fetchWeekShifts();
+  }, []);
+
+  async function fetchWeekShifts() {
+    const { data: userData } = await supabase.auth.getUser();
+    const user = userData.user;
+    if (!user) return;
+
+    // Get this week range
+    const now = new Date();
+    const weekStart = startOfWeek(now, { weekStartsOn: 1 }); // Monday
+    const weekEnd = endOfWeek(now, { weekStartsOn: 1 }); // Sunday
+
+    const { data, error } = await supabase
+      .from<"shifts", Shift>("shifts")
+      .select("*")
+      .gte("start_time", weekStart.toISOString())
+      .lte("start_time", weekEnd.toISOString())
+      .order("start_time");
+
+    if (error) {
+      console.error("Failed to fetch shifts:", error.message);
+      return;
+    }
+
+    if (!data) return;
+
+    setShifts(data);
+
+    // Calculate total minutes
+    let minutes = 0;
+    for (const shift of data) {
+      const startMel = toZonedTime(new Date(shift.start_time), "Australia/Melbourne");
+      const endMel = toZonedTime(new Date(shift.end_time), "Australia/Melbourne");
+      minutes += differenceInMinutes(endMel, startMel);
+    }
+    setTotalMinutes(minutes);
+  }
+
+  // Group shifts by day
+  const shiftsByDay: Record<string, Shift[]> = {};
+  for (let i = 0; i < 7; i++) {
+    const day = format(addDays(startOfWeek(new Date(), { weekStartsOn: 1 }), i), "yyyy-MM-dd");
+    shiftsByDay[day] = [];
+  }
+  for (const shift of shifts) {
+    const day = format(toZonedTime(new Date(shift.start_time), "Australia/Melbourne"), "yyyy-MM-dd");
+    if (!shiftsByDay[day]) shiftsByDay[day] = [];
+    shiftsByDay[day].push(shift);
+  }
+
+  return (
+    <ScrollView contentContainerStyle={styles.container}>
+      <Text style={styles.title}>This Week's Shifts</Text>
+      <Text style={styles.total}>
+        Total Hours: {(totalMinutes / 60).toFixed(2)}
+      </Text>
+
+      {Object.keys(shiftsByDay).map((day) => (
+        <View key={day} style={styles.dayContainer}>
+          <Text style={styles.dayTitle}>{format(new Date(day), "EEEE, MMM d")}</Text>
+          {shiftsByDay[day].length === 0 ? (
+            <Text style={styles.noShift}>No shifts</Text>
+          ) : (
+            shiftsByDay[day].map((shift) => {
+              const start = format(toZonedTime(new Date(shift.start_time), "Australia/Melbourne"), "HH:mm");
+              const end = format(toZonedTime(new Date(shift.end_time), "Australia/Melbourne"), "HH:mm");
+              return (
+                <View key={shift.id} style={styles.shift}>
+                  <Text style={styles.shiftText}>{shift.title || "Shift"}: {start} - {end}</Text>
+                  {shift.location && <Text style={styles.location}>{shift.location}</Text>}
+                </View>
+              );
+            })
+          )}
+        </View>
+      ))}
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flexGrow: 1, padding: 24 },
+  title: { fontSize: 24, fontWeight: "bold", marginBottom: 12 },
+  total: { fontSize: 16, marginBottom: 20 },
+  dayContainer: { marginBottom: 20 },
+  dayTitle: { fontSize: 18, fontWeight: "bold", marginBottom: 6 },
+  shift: { marginBottom: 6, paddingLeft: 12 },
+  shiftText: { fontSize: 14 },
+  location: { fontSize: 12, color: "#666", paddingLeft: 6 },
+  noShift: { fontSize: 14, fontStyle: "italic", color: "#888", paddingLeft: 12 },
+});
